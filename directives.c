@@ -13,15 +13,36 @@
 
 // List of valid directives
 enum directives {
-	// Although ERROR is not a valid directive, 
+	// Although ERROR is not a valid directive,
 	// its presence helps the isDirective() function
 	ERROR, BASE, BYTE, END, RESB, RESW, START
 };
 
+char* charToHex(char c) {
+    char hex[3];
+    snprintf(hex, 3, "%02X", (unsigned char)c);
+    return hex;
+}
+
 // Returns the value associated with a BYTE directive
 int getByteValue(int directiveType, char* string)
 {
-	
+     if (string[0] == 'X') {
+        // Handle hexadecimal value
+        char* hexValue = string + 2; // Skip 'X'
+        return strtol(hexValue, NULL, 16);
+    }
+    else if (string[0] == 'C') {
+        // Handle character value
+        char* charValue = string + 2; // Skip 'C'
+        char hexString[256] = ""; // Initialize an empty string
+        for (int i = 0; charValue[i] != '\''; i++) {
+            strcat(hexString, charToHex(charValue[i]));
+        }
+        return strtol(hexString, NULL, 16);
+    }
+    return -1; // Should not happen
+
 }
 
 // Do no modify any part of this function
@@ -65,19 +86,19 @@ int getMemoryAmount(int directiveType, char* string)
 // Returns true if the provided directive type is the BASE directive; otherwise, false
 bool isBaseDirective(int directiveType)
 {
-	
+	 return directiveType == BASE;
 }
 
 // Returns true if the provided directive type is the BYTE directive; otherwise, false
 bool isDataDirective(int directiveType)
 {
-	
+	return directiveType == BYTE;
 }
 
 // Do no modify any part of this function
 // Tests whether the provided string is a valid directive
 // Returns true if string is valid directive; otherwise, false
-int isDirective(char* string) 
+int isDirective(char* string)
 {
 	if (strcmp(string, "BASE") == 0) { return BASE; }
 	else if (strcmp(string, "BYTE") == 0) { return BYTE; }
@@ -91,13 +112,13 @@ int isDirective(char* string)
 // Returns true if the provided directive type is the END directive; otherwise, false
 bool isEndDirective(int directiveType)
 {
-	
+	 return directiveType == END;
 }
 
 // Returns true if the provided directive type is the RESB or RESW directive; otherwise, false
 bool isReserveDirective(int directiveType)
 {
-	
+	 return (directiveType == RESB) || (directiveType == RESW);
 }
 
 // Returns true if the provided directive type is the START directive; otherwise, false

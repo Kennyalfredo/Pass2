@@ -67,31 +67,64 @@ int main(int argc, char* argv[])
 		exit(-1);
 	}
 	symbol* symbols[SYMBOL_TABLE_SIZE] = { NULL };
-	
+
 	performPass1(symbols, argv[1], &addresses);
-	
+
 	// displaySymbolTable(symbols);
 
 	// Display the assembly summary data
 	// printf("\nStarting Address: 0x%X\nEnding Address: 0x%X\nProgram Size (bytes): %d\n", addresses.start, addresses.current, addresses.current - addresses.start);
-	
+
 	performPass2(symbols, argv[1], &addresses);
 
 	printf("\n\nDone!\n\n");
 }
 
 // Determines the Format 3/4 flags and computes address displacement for Format 3 instruction
-int computeFlagsAndAddress(symbol* symbolArray[], address* addresses, segment* segments, int format)
-{
-	
-}
+int computeFlagsAndAddress(symbol* symbolArray[], address* addresses, segment* segments, int format) {
+    char buffer[strlen(segments->operand) + 1];
+    strcpy(buffer, segments->operand);
+    int bitFlag = 0;
 
+    if (strstr(buffer, IMMEDIATE_CHARACTER)) {
+        bitFlag += FLAG_I;
+        // Remove '#' character
+        memmove(&buffer[0], &buffer[1], strlen(buffer));
+    } else if (!strstr(buffer, INDIRECT_CHARACTER)) {
+        bitFlag += FLAG_N;
+        // Remove '@' character
+        memmove(&buffer[0], &buffer[1], strlen(buffer));
+    } else {
+        bitFlag += FLAG_N + FLAG_I;
+    }
+
+    if (strstr(buffer, INDEX_STRING)) {
+        bitFlag += FLAG_X;
+        // Remove ",X" substring
+        char *pos = strstr(buffer, INDEX_STRING);
+        if (pos != NULL) {
+            *pos = '\0';
+        }
+    }
+
+    if (format == 4) {
+        bitFlag += FLAG_E;
+    }
+
+    if (strcmp(segments->operation, "RSUB") == 0) {
+        bitFlag *= FORMAT_3_MULTIPLIER;
+        return bitFlag;
+    }
+
+
+    return bitFlag;
+}
 // Do no modify any part of this function
 // Returns a new filename using the provided filename and extension
 char* createFilename(char* filename, const char* extension)
 {
 	char* temp = (char*)malloc(sizeof(char) * strlen(filename) + 1);
-	
+
 	int n = strchr(filename, '.') - filename;
 	strncpy(temp, filename, n);
 	strcat(temp, extension);
@@ -109,9 +142,12 @@ void flushTextRecord(FILE* file, objectFileData* data, address* addresses)
 }
 
 // Returns a hex byte containing the registers listed in the provided operand
-int getRegisters(char* operand)
-{
-	
+int getRegisters(char* operand) {
+    int registerValue = getRegisterValue(operand[0]) * REGISTER_MULTIPLIER;
+    if (strlen(operand) > 1) {
+        registerValue += getRegisterValue(operand[strlen(operand) - 1]);
+    }
+    return registerValue;
 }
 
 // Do no modify any part of this function
@@ -158,7 +194,7 @@ void performPass1(symbol* symbolTable[], char* filename, address* addresses)
 	char line[INPUT_BUF_SIZE];
 	FILE* file;
 	int directiveType = 0;
-	
+
 	file = fopen(filename, "r");
 	if (!file)
 	{
@@ -187,7 +223,7 @@ void performPass1(symbol* symbolTable[], char* filename, address* addresses)
 		else
 		{
 			segment* segments = prepareSegments(line);
-						
+
 			if (isDirective(segments->label) || isOpcode(segments->label))
 			{
 				displayError(ILLEGAL_SYMBOL, segments->label);
@@ -230,13 +266,13 @@ void performPass2(struct symbol* symbolTable[], char* filename, address* address
 {
 	// Do not modify any of the provided code
 	objectFileData objectData = { 0, { 0x0 }, { "\0" }, 0, 0x0, 0, { 0 }, 0, '\0', 0x0 };
-	
+
 	char inData[INPUT_BUF_SIZE];
 	char objData[OUTPUT_BUF_SIZE];
 
 	FILE *fileIn, *fileLst, *fileObj;
 	int directiveType = 0;
-		
+
 	char* lstFilename = createFilename(filename, ".lst");
 	char* objFilename = createFilename(filename, ".obj");
 
@@ -248,13 +284,110 @@ void performPass2(struct symbol* symbolTable[], char* filename, address* address
 	}
 	fileLst = fopen(lstFilename, "w");
 	fileObj = fopen(objFilename, "w");
-	
+
 	while (fgets(inData, INPUT_BUF_SIZE, fileIn))
-	{ 
+	{
+	    if (statementBuffer[0] == '#') {
+            continue;
+        }
+
+
 	// Do not modify any of the code provided above
-	
+
 	// Place your code for the performPass2 function here
 
+    char recordType = 'T';
+    segment segments;
+    prepareSegments(statementBuffer, &segments);
+
+    if (isDirective(segments.operation))
+        {
+            if (isStartDirective(segments.operation)) {
+                objectData.recordType = 'H';
+                strcpy(objectData.programName, segments.label);
+                objectData.startAddress = addresses->start;
+                objectData.recordAddress = addresses->start;
+                objectData.programSize = addresses->current - addresses->start;
+                addresses->current = addresses->start;
+
+                writeToObjFile(&objectData, objFile);
+                writeToLstFile(&objectData, lstFile, BLANK_INSTRUCTION);
+            }
+
+        }
+            else if (isBaseDirective(segments.operation))
+            {
+                addresses->base = getSymbolAddress(symbolTable, segments.operand);
+                writeToLstFile(&objectData, lstFile, BLANK_INSTRUCTION);
+            }
+            else if (isEndDirective(segments.operation))
+            {
+              if (objectData.recordByteCount > 0) {
+                    flushTextRecord(&objectData, objFile);
+                }
+                objectData.recordType = 'E';
+                writeToObjFile(&objectData, objFile);
+                writeToLstFile(&objectData, lstFile, BLANK_INSTRUCTION);
+            }
+            else if (isReserveDirective(segments.operation))
+            {
+                if (objectData.recordByteCount > 0)
+                {
+                    flushTextRecord(&objData,objFilename);
+                }
+                 writeToLstFile(&objectData, lstFile, BLANK_INSTRUCTION);
+                addresses->increment = getMemoryAmount(segments.operand);
+                objectData.recordAddress += addresses->increment;
+            }
+            else if (isDataDirective(segments.operation))
+            {
+                addresses->increment = getMemoryAmount(segments.operand);
+                if (objectData.recordByteCount + addresses->increment > MAX_RECORD_BYTE_COUNT) {
+                    flushTextRecord(&objectData, objFile);
+                }
+                int byteValue = getByteValue(segments.operand);
+                objectData.recordEntries[objectData.recordEntryCount].numBytes = addresses->increment;
+                objectData.recordEntries[objectData.recordEntryCount].value = byteValue;
+                objectData.recordEntryCount++;
+                objectData.recordByteCount += addresses->increment;
+
+                writeToLstFile(&objectData, lstFile, byteValue);
+        }
+        else if (isOpcode(segments.operation))
+        {
+            int opcodeValue = getOpcodeValue(segments.operation);
+            int opcodeFormat = getOpcodeFormat(segments.operation);
+
+            if (opcodeFormat == -1)
+            {
+                displayError(ILLEGAL_OPCODE_FORMAT, operation);
+                fclose(fileIn);
+                fclose(fileLst);
+                fclose(fileObj);
+                fclose(fileErrors);
+                exit(-1);
+            }
+
+            // Adjust the opcode value according to its format
+            if (opcodeFormat == 2)
+            {
+                opcodeValue *= OPCODE_MULTIPLIER;
+            }
+            else if (opcodeFormat == 3 || opcodeFormat == 4)
+            {
+                opcodeValue *= OPCODE_MULTIPLIER * OPCODE_MULTIPLIER;
+            }
+
+            if (objectData.recordByteCount + opcodeFormat > MAX_RECORD_BYTE_COUNT)
+            {
+                flushTextRecord(fileObj, &objectData);
+            }
+            addRecordEntry(&objectData, opcodeFormat, opcodeValue);
+            writeToLstFile(fileLst, opcodeValue);
+
+            addresses->current += opcodeFormat;
+            memset(inData, 0, sizeof(inData));
+        }
 
 	// Do not modify any of the code provided below
 	}
@@ -297,10 +430,10 @@ void writeToLstFile(FILE* file, int address, segment* segments, int opcode)
 {
 	char ctrlString[27];
 	int length;
-	
+
 	int directiveType = isDirective(segments->operation);
-	if (isStartDirective(directiveType) || 
-		isBaseDirective(directiveType) || 
+	if (isStartDirective(directiveType) ||
+		isBaseDirective(directiveType) ||
 		isReserveDirective(directiveType))
 	{
 		fprintf(file, "%-8X%-8s%-8s%-8s\n", address, segments->label, segments->operation, segments->operand);
@@ -330,7 +463,7 @@ void writeToLstFile(FILE* file, int address, segment* segments, int opcode)
 void writeToObjFile(FILE* file, objectFileData data)
 {
 	char ctrlString[27];
-	
+
 	if (data.recordType == 'H')
 	{
 		fprintf(file, "H%-6s%06X%06X\n", data.programName, data.startAddress, data.programSize);
